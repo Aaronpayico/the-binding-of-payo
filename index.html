@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>The Binding of Payo: Visual Overhaul</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Permanent+Marker&display=swap');
+        
+        body { background: #0a0a0a; color: white; font-family: 'Courier New', monospace; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; overflow: hidden; }
+        
+        canvas { 
+            border: 15px solid #1a1512; 
+            box-shadow: 0 0 100px rgba(0,0,0,1), inset 0 0 50px #000; 
+            image-rendering: pixelated; 
+            background-color: #3d2e28;
+        }
+
+        /* UI de Stats */
+        .stats-ui { 
+            position: absolute; top: 30px; left: 30px; 
+            background: rgba(20, 20, 20, 0.7); 
+            padding: 20px; 
+            border: 3px solid #555; 
+            border-radius: 4px; 
+            z-index: 10; 
+            transform: rotate(-2deg);
+            font-family: 'Permanent Marker', cursive;
+        }
+
+        /* Menú estilo Hoja de Papel */
+        #menu-overlay {
+            position: absolute;
+            width: 500px;
+            height: 400px;
+            background: #e4d5b7;
+            color: #222;
+            padding: 40px;
+            box-shadow: 10px 10px 0px rgba(0,0,0,0.5);
+            border: 2px solid #222;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            z-index: 100;
+            transform: rotate(-1deg);
+            clip-path: polygon(2% 2%, 98% 1%, 99% 99%, 1% 97%, 3% 50%); /* Bordes irregulares */
+        }
+
+        #menu-overlay h1 { font-family: 'Permanent Marker'; font-size: 45px; margin: 0; }
+        #menu-overlay p { font-weight: bold; }
+
+        /* Pantalla de Carga */
+        #loading-screen {
+            position: absolute;
+            width: 800px;
+            height: 500px;
+            background: black;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 50;
+            font-family: 'Permanent Marker';
+        }
+
+        #boss-ui { position: absolute; bottom: 40px; width: 600px; display: none; text-align: center; z-index: 10; }
+        
+        #bar { 
+            width: 100%; height: 22px; 
+            background: #111; 
+            border: 4px solid #300; 
+            box-shadow: 0 0 15px #f00;
+            border-radius: 0px; 
+            overflow: hidden; 
+            margin-top: 10px;
+        }
+
+        #hp-fill { width: 100%; height: 100%; background: linear-gradient(90deg, #400, #f00, #400); transition: 0.2s; }
+        
+        #flash { position: fixed; top:0; left:0; width:100%; height:100%; background: #600; opacity: 0; pointer-events: none; z-index: 100; }
+
+        .overlay-vignette {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: radial-gradient(circle, transparent 40%, rgba(0,0,0,0.8) 100%);
+            pointer-events: none; z-index: 5;
+        }
+    </style>
+</head>
+<body>
+    <div id="flash"></div>
+    <div class="overlay-vignette"></div>
+
+    <div id="loading-screen">
+        <h2 id="loading-text" style="font-size: 40px;">BASEMENT</h2>
+        <div style="width: 60px; height: 80px; background: white; border-radius: 50%; border: 3px solid white; position: relative;">
+            <div style="position: absolute; top: 30px; left: 10px; width: 10px; height: 10px; background: black; border-radius: 50%;"></div>
+            <div style="position: absolute; top: 30px; right: 10px; width: 10px; height: 10px; background: black; border-radius: 50%;"></div>
+        </div>
+        <p>LOADING...</p>
+    </div>
+
+    <div id="menu-overlay">
+        <h1>THE BINDING OF PAYO</h1>
+        <hr style="width: 80%; border: 1px solid #222; margin: 20px;">
+        <p>WASD: MOVE<br>ARROWS: SHOOT</p>
+        <h2 style="font-family: 'Permanent Marker'; cursor: pointer; color: #a00;">[ PRESS ENTER ]</h2>
+        <p style="font-size: 12px; margin-top: 20px;">Based on a true nightmare</p>
+    </div>
+
+    <div id="ui" class="stats-ui" style="display:none">
+        <div id="hp-txt" style="color:#ff2222; font-size:28px; text-shadow: 3px 3px #000;">HP: ❤❤❤</div>
+        <div id="dmg-txt" style="color:#ffcc00; font-size:18px; text-shadow: 2px 2px #000;">DMG: 1.0</div>
+        <div id="floor-txt" style="color:#ffffff; font-size:14px; opacity: 0.6;">STAGE: BASEMENT</div>
+    </div>
+
+    <div id="boss-ui">
+        <div id="boss-name" style="color:#ff2222; font-family: 'Permanent Marker', cursive; font-size: 24px; letter-spacing: 5px; text-shadow: 3px 3px #000;">BOSS</div>
+        <div id="bar"><div id="hp-fill"></div></div>
+    </div>
+
+    <canvas id="gameCanvas" width="800" height="500"></canvas>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height, WALL = 50, DOOR = 80;
+
+const FLOORS = [
+    { name: "THE BASEMENT", color: "#3d2e28", wall: "#2a1f1a", bossLoc: {x:2, y:0}, noise: "#342822" },
+    { name: "THE VOID", color: "#0d0d12", wall: "#050508", bossLoc: {x:0, y:2}, noise: "#1a1a24" },
+    { name: "THE WOMB", color: "#6e1111", wall: "#4a0a0a", bossLoc: {x:2, y:2}, noise: "#5a0d0d" }
+];
+
+let currentFloor = 0, gameState = "MENU", currentPos = { x: 0, y: 0 }, rooms = {};
+let player = { x: W/2, y: H/2, w: 30, h: 40, hp: 6, maxHp: 6, dmg: 1, speed: 4.5, lastShot: 0, lastHit: 0 };
+let tears = [], enemies = [], enemyTears = [], items = [], spikes = [], boss = null, trapdoor = null;
+let roomActiveTimer = 0, attackCounter = 0;
+let isLoading = false;
+const keys = {};
+
+window.onkeydown = e => { 
+    keys[e.code] = true; 
+    if(gameState === "MENU" && e.code === "Enter") startGame(); 
+    if(gameState === "GAMEOVER" && e.code === "Enter") location.reload(); 
+};
+window.onkeyup = e => keys[e.code] = false;
+
+function triggerFlash() {
+    const f = document.getElementById('flash');
+    f.style.opacity = "0.4";
+    setTimeout(() => f.style.opacity = "0", 150);
+}
+
+function startGame() { 
+    gameState = "PLAYING"; 
+    document.getElementById('ui').style.display = "block"; 
+    document.getElementById('menu-overlay').style.display = "none";
+    loadRoom(0, 0); 
+}
+
+function loadRoom(rx, ry) {
+    // Pantalla de carga visual
+    isLoading = true;
+    const loader = document.getElementById('loading-screen');
+    const loadTxt = document.getElementById('loading-text');
+    loadTxt.innerText = FLOORS[currentFloor].name;
+    loader.style.display = "flex";
+
+    setTimeout(() => {
+        isLoading = false;
+        loader.style.display = "none";
+    }, 800);
+
+    currentPos = { x: rx, y: ry };
+    const id = `${rx},${ry}`;
+    tears = []; enemyTears = []; roomActiveTimer = Date.now() + 600;
+    
+    spikes = [];
+    if (!(rx === 0 && ry === 0)) {
+        for(let i=0; i<3 + Math.random()*4; i++) {
+            spikes.push({ x: 150 + Math.random()*500, y: 150 + Math.random()*200, size: 30 });
+        }
+    }
+
+    if (!rooms[id]) {
+        rooms[id] = { visited: true };
+        enemies = [];
+        const target = FLOORS[currentFloor].bossLoc;
+        if (rx === target.x && ry === target.y) spawnBoss();
+        else if (rx !== 0 || ry !== 0) {
+            let num = 4 + currentFloor * 2;
+            for(let i=0; i<num; i++) enemies.push({ x: 150+Math.random()*500, y: 150+Math.random()*200, hp: 2+currentFloor, type: currentFloor==0?'blob':(currentFloor==1?'evil':'fast'), lastShot: 0 });
+        }
+    }
+}
+
+function spawnBoss() {
+    const names = ["MONSTRO", "PAYO DELIRIUM", "THE CARNAL SHRIMP"];
+    document.getElementById('boss-name').innerText = names[currentFloor];
+    document.getElementById('boss-ui').style.display = "block";
+    boss = { x: W/2, y: H/2, hp: 60+currentFloor*80, maxHp: 60+currentFloor*80, lastAction: 0, pattern: 0 };
+}
+
+function getTearColor() {
+    if (player.dmg < 2) return "#71d5ff";
+    if (player.dmg < 3) return "#ff4444";
+    if (player.dmg < 4) return "#ffaa00";
+    return "#cc00ff";
+}
+
+function update() {
+    if (gameState !== "PLAYING" || isLoading) return;
+    if (player.hp <= 0) { gameState = "GAMEOVER"; return; }
+    let now = Date.now();
+
+    if (keys['KeyW']) player.y -= player.speed; if (keys['KeyS']) player.y += player.speed;
+    if (keys['KeyA']) player.x -= player.speed; if (keys['KeyD']) player.x += player.speed;
+
+    spikes.forEach(s => {
+        if (Math.hypot(player.x+15 - s.x, player.y+20 - s.y) < 25 && now - player.lastHit > 1000) {
+            player.hp -= 2;
+            player.lastHit = now;
+            triggerFlash();
+        }
+    });
+
+    if (player.x < 0) { player.x = W-40; loadRoom(currentPos.x-1, currentPos.y); }
+    if (player.x > W) { player.x = 40; loadRoom(currentPos.x+1, currentPos.y); }
+    if (player.y < 0) { player.y = H-40; loadRoom(currentPos.x, currentPos.y+1); }
+    if (player.y > H) { player.y = 40; loadRoom(currentPos.x, currentPos.y-1); }
+
+    if (now - player.lastShot > 250) {
+        let vx=0, vy=0;
+        if (keys['ArrowUp']) vy=-9; else if (keys['ArrowDown']) vy=9;
+        else if (keys['ArrowLeft']) vx=-9; else if (keys['ArrowRight']) vx=9;
+        if (vx || vy) { tears.push({x: player.x+15, y: player.y+15, vx, vy, t: 45, size: 6+player.dmg*2, color: getTearColor()}); player.lastShot = now; }
+    }
+
+    if (boss && now > roomActiveTimer) {
+        attackCounter++;
+        if (now - boss.lastAction > 1500 - (currentFloor*200)) {
+            boss.pattern = (boss.pattern + 1) % 3;
+            boss.lastAction = now;
+            if(currentFloor < 2 || Math.random() > 0.5) { boss.x = 150+Math.random()*500; boss.y = 150+Math.random()*200; }
+        }
+        if (currentFloor === 0 && attackCounter % 50 === 0) {
+            for(let i=0; i<8; i++) enemyTears.push({x: boss.x, y: boss.y, vx: Math.cos(i)*8, vy: Math.sin(i)*8});
+        } else if (currentFloor === 1) { 
+            if (boss.pattern === 0) enemyTears.push({x: boss.x, y: boss.y, vx: Math.cos(attackCounter*0.13)*5, vy: Math.sin(attackCounter*0.13)*5});
+            else if (attackCounter % 40 === 0) {
+                let a = Math.atan2(player.y-boss.y, player.x-boss.x);
+                enemyTears.push({x: boss.x, y: boss.y, vx: Math.cos(a)*8, vy: Math.sin(a)*8});
+            }
+        } else if (currentFloor === 2) {
+            if (boss.pattern === 0 && attackCounter % 20 === 0) {
+                for(let i=0; i<16; i++) enemyTears.push({x: boss.x, y: boss.y, vx: Math.cos(i*Math.PI/8)*6, vy: Math.sin(i*Math.PI/8)*6});
+            } else if (attackCounter % 5 === 0) {
+                let a = Math.atan2(player.y-boss.y, player.x-boss.x);
+                enemyTears.push({x: boss.x, y: boss.y, vx: Math.cos(a+(Math.random()-0.5)*0.3)*11, vy: Math.sin(a+(Math.random()-0.5)*0.3)*11});
+            }
+        }
+        if (boss.hp <= 0) { boss = null; document.getElementById('boss-ui').style.display="none"; trapdoor = {x: W/2, y: H/2}; }
+        else document.getElementById('hp-fill').style.width = (boss.hp/boss.maxHp*100) + "%";
+    }
+
+    tears = tears.filter(t => {
+        t.x += t.vx; t.y += t.vy; t.t--;
+        enemies.forEach(en => { if (Math.hypot(t.x-en.x, t.y-en.y) < 25) { en.hp -= player.dmg; t.t=0; } });
+        if (boss && Math.hypot(t.x-boss.x, t.y-boss.y) < 50) { boss.hp -= player.dmg; t.t=0; }
+        return t.t > 0;
+    });
+
+    enemies = enemies.filter(en => {
+        let d = Math.hypot(player.x-en.x, player.y-en.y);
+        if (now > roomActiveTimer) {
+            en.x += (player.x-en.x)/d * 2.2; en.y += (player.y-en.y)/d * 2.2;
+            if (currentFloor >= 1 && now - en.lastShot > 1400) {
+                let a = Math.atan2(player.y-en.y, player.x-en.x);
+                enemyTears.push({x: en.x, y: en.y, vx: Math.cos(a)*6, vy: Math.sin(a)*6});
+                en.lastShot = now;
+            }
+            if (d < 30 && now - player.lastHit > 1000) { player.hp--; player.lastHit = now; triggerFlash(); }
+        }
+        if (en.hp <= 0) {
+            let r = Math.random();
+            if (r < 0.3) items.push({x: en.x, y: en.y, type: r < 0.15 ? 'heart' : 'dmg'});
+            return false;
+        }
+        return true;
+    });
+
+    enemyTears = enemyTears.filter(et => {
+        et.x += et.vx; et.y += et.vy;
+        if (Math.hypot(et.x-(player.x+15), et.y-(player.y+20)) < 22 && now - player.lastHit > 1000) { player.hp--; player.lastHit = now; triggerFlash(); return false; }
+        return et.x > 0 && et.x < W && et.y > 0 && et.y < H;
+    });
+
+    items = items.filter(it => {
+        if (Math.hypot(player.x+15-it.x, player.y+20-it.y) < 30) {
+            if (it.type === 'heart') player.hp = Math.min(player.hp+2, player.maxHp);
+            else player.dmg += 0.6;
+            return false;
+        }
+        return true;
+    });
+
+    if (trapdoor && Math.hypot(player.x+15-trapdoor.x, player.y+20-trapdoor.y) < 30) {
+        currentFloor++; if(currentFloor < 3) { rooms = {}; trapdoor = null; loadRoom(0,0); } else location.reload();
+    }
+
+    document.getElementById('hp-txt').innerText = "HP: " + "❤".repeat(Math.ceil(player.hp/2));
+    document.getElementById('dmg-txt').innerText = "DMG: " + player.dmg.toFixed(1);
+    document.getElementById('floor-txt').innerText = "STAGE: " + FLOORS[currentFloor].name;
+}
+
+function drawShadow(x, y, rad) {
+    ctx.fillStyle = "rgba(0,0,0,0.4)";
+    ctx.beginPath(); ctx.ellipse(x, y+18, rad, rad/2.5, 0, 0, 7); ctx.fill();
+}
+
+function drawIsaac(x, y, color, lh) {
+    ctx.save();
+    drawShadow(x, y, 16);
+    if (Date.now()-lh < 1000 && Math.floor(Date.now()/100)%2) ctx.globalAlpha = 0.4;
+    
+    // Cabeza
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(x, y - 12, 20, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#1a1a1a"; ctx.lineWidth = 3; ctx.stroke();
+    
+    // Cuerpo
+    ctx.fillStyle = color;
+    ctx.fillRect(x - 12, y - 2, 24, 18);
+    ctx.strokeRect(x - 12, y - 2, 24, 18);
+
+    // Ojos
+    ctx.fillStyle = "black";
+    ctx.beginPath();
+    ctx.ellipse(x - 8, y - 15, 4.5, 7, 0, 0, Math.PI * 2);
+    ctx.ellipse(x + 8, y - 15, 4.5, 7, 0, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // Lagrimas decorativas
+    ctx.fillStyle = "rgba(80, 191, 230, 0.6)";
+    ctx.fillRect(x - 9, y - 9, 3, 6);
+    ctx.fillRect(x + 6, y - 9, 3, 6);
+
+    ctx.restore();
+}
+
+function drawSpikes(x, y) {
+    ctx.save();
+    ctx.fillStyle = "#555";
+    ctx.shadowBlur = 5; ctx.shadowColor = "red";
+    ctx.beginPath();
+    for(let i=0; i<6; i++) {
+        let ang = (i / 6) * Math.PI * 2;
+        ctx.moveTo(x + Math.cos(ang)*18, y + Math.sin(ang)*18);
+        ctx.lineTo(x + Math.cos(ang+0.4)*8, y + Math.sin(ang+0.4)*8);
+        ctx.lineTo(x, y);
+    }
+    ctx.fill();
+    ctx.strokeStyle = "#222"; ctx.lineWidth = 2; ctx.stroke();
+    ctx.restore();
+}
+
+function drawFloorDecor() {
+    const f = FLOORS[currentFloor];
+    ctx.fillStyle = f.noise;
+    for(let i=0; i<15; i++) {
+        ctx.globalAlpha = 0.1;
+        ctx.fillRect((i*137)%W, (i*223)%H, 30, 30);
+    }
+    ctx.globalAlpha = 1.0;
+}
+
+function draw() {
+    if (isLoading) return;
+    const f = FLOORS[currentFloor];
+    
+    ctx.fillStyle = f.color; ctx.fillRect(0,0,W,H);
+    drawFloorDecor();
+
+    ctx.fillStyle = f.wall; 
+    ctx.fillRect(0,0,W,WALL); ctx.fillRect(0,H-WALL,W,WALL); 
+    ctx.fillRect(0,0,WALL,H); ctx.fillRect(W-WALL,0,WALL,H);
+    
+    ctx.fillStyle = "rgba(0,0,0,0.3)";
+    ctx.fillRect(WALL, WALL, W-WALL*2, 15);
+
+    ctx.fillStyle = "#000";
+    ctx.fillRect(W/2-DOOR/2, 0, DOOR, WALL-10); ctx.fillRect(W/2-DOOR/2, H-WALL+10, DOOR, WALL);
+    ctx.fillRect(0, H/2-DOOR/2, WALL-10, DOOR); ctx.fillRect(W-WALL+10, H/2-DOOR/2, WALL, DOOR);
+
+    spikes.forEach(s => drawSpikes(s.x, s.y));
+
+    if (trapdoor) { 
+        ctx.fillStyle="black"; ctx.beginPath(); ctx.arc(trapdoor.x, trapdoor.y, 35, 0, 7); ctx.fill(); 
+        ctx.strokeStyle="#333"; ctx.lineWidth=5; ctx.stroke();
+    }
+
+    const target = FLOORS[currentFloor].bossLoc;
+    const dx = target.x - currentPos.x; const dy = target.y - currentPos.y;
+    if (dx !== 0 || dy !== 0) {
+        ctx.save(); ctx.translate(player.x + 15, player.y - 45);
+        ctx.rotate(Math.atan2(-dy, dx)); 
+        let pulse = Math.sin(Date.now()*0.01)*5;
+        ctx.fillStyle = `rgb(${200+pulse*10}, 20, 20)`;
+        ctx.beginPath(); ctx.moveTo(20+pulse, 0); ctx.lineTo(0, -10); ctx.lineTo(0, 10); ctx.fill(); 
+        ctx.restore();
+    }
+
+    items.forEach(it => {
+        drawShadow(it.x, it.y, 12);
+        ctx.fillStyle = it.type === 'heart' ? "#ff0000" : "#ffcc00";
+        ctx.beginPath(); ctx.arc(it.x, it.y + Math.sin(Date.now()*0.005)*5, 12, 0, 7); ctx.fill();
+        ctx.strokeStyle = "white"; ctx.stroke();
+    });
+
+    drawIsaac(player.x+15, player.y+20, "#fff0f0", player.lastHit);
+
+    enemies.forEach(en => {
+        if (en.type === 'evil') drawIsaac(en.x, en.y, "#222", 0);
+        else if (en.type === 'fast') drawIsaac(en.x, en.y, "#ffffcc", 0);
+        else { 
+            drawShadow(en.x, en.y, 20); 
+            ctx.fillStyle="#a00"; ctx.beginPath(); ctx.arc(en.x, en.y, 20, 0, 7); ctx.fill();
+            ctx.fillStyle="#500"; ctx.beginPath(); ctx.arc(en.x-5, en.y-5, 5, 0, 7); ctx.arc(en.x+5, en.y-5, 5, 0, 7); ctx.fill();
+        }
+    });
+
+    if (boss) {
+        drawShadow(boss.x, boss.y, 60);
+        ctx.fillStyle = currentFloor==0?"#f5baba":(currentFloor==1?"#f0f0f0":"#300");
+        ctx.beginPath(); ctx.arc(boss.x, boss.y, 55+currentFloor*5, 0, 7); ctx.fill();
+        ctx.strokeStyle = "black"; ctx.lineWidth = 4; ctx.stroke();
+        ctx.fillStyle = "black";
+        ctx.beginPath(); ctx.arc(boss.x-20, boss.y-10, 10, 0, 7); ctx.arc(boss.x+20, boss.y-10, 10, 0, 7); ctx.fill();
+    }
+
+    tears.forEach(t => { 
+        ctx.save();
+        ctx.shadowBlur = 10; ctx.shadowColor = t.color;
+        ctx.fillStyle = t.color; 
+        ctx.beginPath(); ctx.arc(t.x, t.y, t.size, 0, 7); ctx.fill(); 
+        ctx.strokeStyle = "white"; ctx.lineWidth = 2; ctx.stroke();
+        ctx.restore();
+    });
+    
+    enemyTears.forEach(t => { 
+        ctx.fillStyle = (currentFloor === 1) ? "#fff" : (currentFloor === 2 ? "#ff0" : "#200");
+        ctx.beginPath(); ctx.arc(t.x, t.y, 8, 0, 7); ctx.fill(); 
+        ctx.strokeStyle = "red"; ctx.lineWidth = 1; ctx.stroke();
+    });
+    
+    if (gameState === "GAMEOVER") {
+        ctx.fillStyle = "rgba(60,0,0,0.85)"; ctx.fillRect(0,0,W,H);
+        ctx.fillStyle = "white"; ctx.textAlign = "center"; ctx.font = "bold 60px 'Permanent Marker'";
+        ctx.fillText("HAS MUERTO", W/2, H/2);
+        ctx.font = "20px 'Courier New'";
+        ctx.fillText("ENTER PARA REINTENTAR", W/2, H/2+60);
+    }
+}
+
+function loop() { update(); draw(); requestAnimationFrame(loop); }
+loop();
+</script>
+</body>
+</html>
